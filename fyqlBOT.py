@@ -1,41 +1,43 @@
 import os
 import shutil
 import subprocess
+import sys
 
 def locate_pen_drives():
-    """Locate all connected pen drives."""
+    """Locate all connected writable pen drives (excluding system volumes)."""
+    excluded = ["Macintosh HD", "Macintosh HD - Data", "Recovery", "com.apple.TimeMachine.localsnapshots"]
     pen_drives = []
     volumes = [os.path.join("/Volumes", d) for d in os.listdir("/Volumes") if not d.startswith(".")]
     for volume in volumes:
-        if os.path.ismount(volume):
-            pen_drives.append(volume)
+        if os.path.ismount(volume) and os.access(volume, os.W_OK):
+            drive_name = os.path.basename(volume)
+            if drive_name not in excluded:
+                pen_drives.append(volume)
     return pen_drives
 
-def create_backup_folders(drive):
-    """Create 'fyql' backup folder on the specified drive."""
-    backup_folder = os.path.join(drive, "fyql")
-    if not os.path.exists(backup_folder):
-        os.makedirs(backup_folder)
-    return backup_folder
 
-def move_files_to_pen_drive(pen_drive, file_sequence):
-    """Move files from top level of pen drive to the 'fyql' folder."""
-    moved_files = []
-    backup_folder = create_backup_folders(pen_drive)
+def create_fyql_folder(drive):
+    """Create 'fyql' folder on the specified drive."""
+    fyql_folder = os.path.join(drive, "fyql")
+    os.makedirs(fyql_folder, exist_ok=True)
+    return fyql_folder
+
+def copy_files_to_pen_drive(source_dir, pen_drive, file_sequence):
+    """Copy specified files from source directory to pen drive's 'fyql' folder."""
+    fyql_folder = create_fyql_folder(pen_drive)
+    copied_files = []
+
     for filename in file_sequence:
-        source_file = os.path.join(pen_drive, filename)
-        if os.path.isfile(source_file):
-            destination_file = os.path.join(backup_folder, os.path.basename(filename))
-            shutil.move(source_file, destination_file)
-            moved_files.append(filename)
-            print(f"Moved '{filename}' to '{backup_folder}'")
-    
-    # Check if the backup folder is empty
-    if not os.listdir(backup_folder):
-        print("Stupid" * 3)
-        exit()
-    
-    return moved_files
+        source_path = os.path.join(source_dir, filename)
+        if os.path.isfile(source_path):
+            destination_path = os.path.join(fyql_folder, os.path.basename(filename))
+            shutil.copy2(source_path, destination_path)
+            copied_files.append(filename)
+            print(f"Copied '{filename}' to '{fyql_folder}'")
+        else:
+            print(f"[Warning] File not found: {source_path}")
+
+    return copied_files
 
 def eject_pen_drive(drive):
     """Eject the specified pen drive."""
@@ -66,17 +68,31 @@ if __name__ == "__main__":
         "2 - FYQL - 09 看海（之一）.mp3",
         "2 - FYQL - 10 承先启后.mp3"
     ]
-    
-    pen_drives = locate_pen_drives()
-    if len(pen_drives) == 0:
-        print("No pen drives found.")
+
+    if getattr(sys, 'frozen', False):
+        # Running as a bundled executable
+        script_dir = os.path.dirname(sys.executable)
     else:
-        print("Pen drives found:")
-        for i, drive in enumerate(pen_drives, 1):
-            print(f"{i}. {drive}")
-            moved_files = move_files_to_pen_drive(drive, file_sequence)
-            print("Files moved successfully to the 'fyql' folder.")
-            print("Files moved:")
-            for filename in moved_files:
-                print(filename)
-            eject_pen_drive(drive)
+        # Running as a normal Python script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    source_dir = os.path.join(script_dir, "FYQL_source")
+
+    if not os.path.isdir(source_dir):
+        print(f"'FYQL_source' folder not found at: {source_dir}")
+        exit()
+
+    pen_drives = locate_pen_drives()
+    if not pen_drives:
+        print("No pen drives found.")
+        exit()
+
+    print("\nPen drives found:")
+    for i, drive in enumerate(pen_drives, 1):
+        print(f"{i}. {drive}")
+
+    for drive in pen_drives:
+        print(f"\nCopying to {drive}...")
+        copied_files = copy_files_to_pen_drive(source_dir, drive, file_sequence)
+        print(f"{len(copied_files)} files copied successfully.")
+        eject_pen_drive(drive)
